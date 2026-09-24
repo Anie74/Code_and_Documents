@@ -1,0 +1,769 @@
+### Detection des erreurs debutants - Erreurs de Capitalisation
+
+Ce document regroupe le code pour chaque règle pour debutant,
+ainsi que la **classe de test** associée. Chaque règle suit la structure standard Renraku :
+`checkMethod:`, `group`, `name`, `rationale`, `severity` (instance side) et `ruleName` (class side).
+
+> Les Packages utilisés : `Renraku` pour les règles, `Renraku-Tests` pour les tests.
+
+---
+
+## Sommaire
+
+1. [ReBooleanCapitalizationRule](#1-rebooleancapitalizationrule) — détecte `True`/`False`/`Nil`
+2. [ReSelfCapitalizationRule](#2-reselfcapitalizationrule) — détecte `Self`
+3. [ReIfTrueColonRule](#3-reiftruecolonrule) — détecte `ifTrue[` / `ifFalse[` sans `:`
+4. [ReReturnKeywordRule](#4-rereturnkeywordrule) — détecte `return` au lieu de `^`
+5. [ReAndOperatorRule](#5-reandoperatorrule) — détecte `&&` au lieu de `and:`
+6. [ReOrOperatorRule](#6-reoroperatorrule) — détecte `||` au lieu de `or:`
+7. [Noob](#7-noob) — règle agrégée qui combine toutes les détections ci-dessus
+8. [Exécution des tests](#8-exécution-des-tests)
+
+---
+
+## 1. ReBooleanCapitalizationRule
+
+Détecte les booléens et `nil` mal capitalisés (`True`, `False`, `Nil`).
+
+### Règle
+
+```smalltalk
+ReAbstractRule subclass: #ReBooleanCapitalizationRule
+    instanceVariableNames: ''
+    classVariableNames: ''
+    package: 'Renraku'
+
+"===== INSTANCE SIDE ====="
+
+"Protocole: checking"
+ReBooleanCapitalizationRule >> checkMethod: aMethod
+
+    | critiques sourceCode |
+    critiques := OrderedCollection new.
+    sourceCode := aMethod sourceCode.
+
+    self detectBoolean: 'True' -> 'true' in: sourceCode for: aMethod critiques: critiques.
+    self detectBoolean: 'False' -> 'false' in: sourceCode for: aMethod critiques: critiques.
+    self detectBoolean: 'Nil' -> 'nil' in: sourceCode for: aMethod critiques: critiques.
+  
+
+"Protocole: private"
+ReBooleanCapitalizationRule >> detectBoolean: wrongForm shouldBe: correctForm in: sourceCode for: aMethod addTo: critiques
+    "Détecte une forme incorrecte et crée une critique avec message personnalisé"
+
+    (sourceCode includesSubstring: wrongForm) ifTrue: [
+        critiques add: (ReTrivialCritique new
+            rule: self;
+            entity: aMethod;
+            tinyHint: wrongForm, ' doit être écrit ', correctForm, ' (minuscules)';
+            yourself) ]
+
+"Protocole: accessing"
+ReBooleanCapitalizationRule >> group
+    ^ 'Erreurs débutant'
+
+ReBooleanCapitalizationRule >> name
+    ^ 'Booléens mal capitalisés'
+
+ReBooleanCapitalizationRule >> rationale
+    ^ 'En Pharo, les booléens et nil doivent être écrits en minuscules: true, false, nil'
+
+ReBooleanCapitalizationRule >> severity
+    ^ #error
+
+"===== CLASS SIDE ====="
+
+"Protocole: accessing"
+ReBooleanCapitalizationRule class >> uniqueIdentifierName
+    ^ 'BooleanCapitalization'
+```
+
+### Tests
+
+```smalltalk
+TestCase subclass: #ReBooleanCapitalizationRuleTest
+    instanceVariableNames: 'rule testClass'
+    classVariableNames: ''
+    package: 'Renraku-Tests'
+
+ReBooleanCapitalizationRuleTest >> setUp
+    super setUp.
+    rule := ReBooleanCapitalizationRule new.
+    testClass := Object subclass: #TestBooleanClass
+        instanceVariableNames: ''
+        classVariableNames: ''
+        package: 'Renraku-Tests-Temp'
+
+ReBooleanCapitalizationRuleTest >> tearDown
+    testClass removeFromSystem.
+    super tearDown
+
+ReBooleanCapitalizationRuleTest >> testDetectTrue
+    | method critiques |
+    testClass compile: 'testMethod
+        ^ True'.
+    method := testClass >> #testMethod.
+    critiques := rule checkMethod: method.
+    self assert: critiques size equals: 1.
+    self assert: (critiques first tinyHint includesSubstring: 'true')
+
+ReBooleanCapitalizationRuleTest >> testDetectFalse
+    | method critiques |
+    testClass compile: 'testMethod
+        ^ False'.
+    method := testClass >> #testMethod.
+    critiques := rule checkMethod: method.
+    self assert: critiques size equals: 1.
+    self assert: (critiques first tinyHint includesSubstring: 'false')
+
+ReBooleanCapitalizationRuleTest >> testDetectNil
+    | method critiques |
+    testClass compile: 'testMethod
+        ^ Nil'.
+    method := testClass >> #testMethod.
+    critiques := rule checkMethod: method.
+    self assert: critiques size equals: 1.
+    self assert: (critiques first tinyHint includesSubstring: 'nil')
+
+ReBooleanCapitalizationRuleTest >> testDetectMultiple
+    | method critiques |
+    testClass compile: 'testMethod
+        True ifTrue: [ ^ False ].
+        ^ Nil'.
+    method := testClass >> #testMethod.
+    critiques := rule checkMethod: method.
+    self assert: critiques size equals: 3
+
+ReBooleanCapitalizationRuleTest >> testNoFalsePositives
+    | method critiques |
+    testClass compile: 'testMethod
+        true ifTrue: [ ^ false ].
+        ^ nil'.
+    method := testClass >> #testMethod.
+    critiques := rule checkMethod: method.
+    self assert: critiques isEmpty
+```
+
+---
+
+## 2. ReSelfCapitalizationRule
+
+Détecte `Self` au lieu de `self`.
+
+### Règle
+
+```smalltalk
+ReAbstractRule subclass: #ReSelfCapitalizationRule
+    instanceVariableNames: ''
+    classVariableNames: ''
+    package: 'Renraku'
+
+"Instance side"
+ReSelfCapitalizationRule >> checkMethod: aMethod
+    (aMethod sourceCode includesSubstring: 'Self') ifTrue: [
+        ^ { ReTrivialCritique new
+            rule: self;
+            entity: aMethod;
+            tinyHint: 'Self doit être écrit self (minuscules)';
+            yourself } ].
+    ^ #()
+
+ReSelfCapitalizationRule >> group
+    ^ 'Erreurs débutant'
+
+ReSelfCapitalizationRule >> name
+    ^ 'Self au lieu de self'
+
+ReSelfCapitalizationRule >> rationale
+    ^ 'En Pharo, self s''écrit en minuscules'
+
+ReSelfCapitalizationRule >> severity
+    ^ #error
+
+"Class side"
+ReSelfCapitalizationRule class >> uniqueIdentifierName
+    ^ 'SelfCapitalization'
+```
+
+### Tests
+
+```smalltalk
+TestCase subclass: #ReSelfCapitalizationRuleTest
+    instanceVariableNames: 'rule testClass'
+    classVariableNames: ''
+    package: 'Renraku-Tests'
+
+ReSelfCapitalizationRuleTest >> setUp
+    super setUp.
+    rule := ReSelfCapitalizationRule new.
+    testClass := Object subclass: #TestSelfClass
+        instanceVariableNames: ''
+        classVariableNames: ''
+        package: 'Renraku-Tests-Temp'
+
+ReSelfCapitalizationRuleTest >> tearDown
+    testClass removeFromSystem.
+    super tearDown
+
+ReSelfCapitalizationRuleTest >> testDetectSelf
+    | method critiques |
+    testClass compile: 'testMethod
+        ^ Self value'.
+    method := testClass >> #testMethod.
+    critiques := rule checkMethod: method.
+    self assert: critiques size equals: 1
+
+ReSelfCapitalizationRuleTest >> testNoDetectionForCorrectSelf
+    | method critiques |
+    testClass compile: 'testMethod
+        ^ self value'.
+    method := testClass >> #testMethod.
+    critiques := rule checkMethod: method.
+    self assert: critiques isEmpty
+```
+
+---
+
+## 3. ReIfTrueColonRule
+
+Détecte `ifTrue[` et `ifFalse[` sans les deux-points requis.
+
+### Règle
+
+```smalltalk
+ReAbstractRule subclass: #ReIfTrueColonRule
+    instanceVariableNames: ''
+    classVariableNames: ''
+    package: 'Renraku'
+
+"Instance side"
+ReIfTrueColonRule >> checkMethod: aMethod
+    | critiques sourceCode |
+    critiques := OrderedCollection new.
+    sourceCode := aMethod sourceCode.
+
+    (sourceCode includesSubstring: 'ifTrue[') ifTrue: [
+        critiques add: (ReTrivialCritique new
+            rule: self;
+            entity: aMethod;
+            tinyHint: 'ifTrue[ doit être écrit ifTrue: [';
+            yourself) ].
+
+    (sourceCode includesSubstring: 'ifFalse[') ifTrue: [
+        critiques add: (ReTrivialCritique new
+            rule: self;
+            entity: aMethod;
+            tinyHint: 'ifFalse[ doit être écrit ifFalse: [';
+            yourself) ].
+
+    ^ critiques
+
+ReIfTrueColonRule >> group
+    ^ 'Erreurs débutant'
+
+ReIfTrueColonRule >> name
+    ^ 'ifTrue/ifFalse nécessitent un deux-points'
+
+ReIfTrueColonRule >> rationale
+    ^ 'Les messages ifTrue: et ifFalse: nécessitent un deux-points avant le bloc'
+
+ReIfTrueColonRule >> severity
+    ^ #error
+
+"Class side"
+ReIfTrueColonRule class >> uniqueIdentifierName
+    ^ 'IfTrueColon'
+```
+
+### Tests
+
+```smalltalk
+TestCase subclass: #ReIfTrueColonRuleTest
+    instanceVariableNames: 'rule testClass'
+    classVariableNames: ''
+    package: 'Renraku-Tests'
+
+ReIfTrueColonRuleTest >> setUp
+    super setUp.
+    rule := ReIfTrueColonRule new.
+    testClass := Object subclass: #TestIfTrueClass
+        instanceVariableNames: ''
+        classVariableNames: ''
+        package: 'Renraku-Tests-Temp'
+
+ReIfTrueColonRuleTest >> tearDown
+    testClass removeFromSystem.
+    super tearDown
+
+ReIfTrueColonRuleTest >> testDetectIfTrueWithoutColon
+    | method critiques |
+    testClass compile: 'testMethod: x
+        x ifTrue[ ^ 1 ]'.
+    method := testClass >> #testMethod:.
+    critiques := rule checkMethod: method.
+    self assert: critiques size equals: 1
+
+ReIfTrueColonRuleTest >> testDetectIfFalseWithoutColon
+    | method critiques |
+    testClass compile: 'testMethod: x
+        x ifFalse[ ^ 0 ]'.
+    method := testClass >> #testMethod:.
+    critiques := rule checkMethod: method.
+    self assert: critiques size equals: 1
+
+ReIfTrueColonRuleTest >> testNoDetectionForCorrectSyntax
+    | method critiques |
+    testClass compile: 'testMethod: x
+        x ifTrue: [ ^ 1 ]'.
+    method := testClass >> #testMethod:.
+    critiques := rule checkMethod: method.
+    self assert: critiques isEmpty
+```
+
+---
+
+## 4. ReReturnKeywordRule
+
+Détecte l'utilisation du mot-clé `return` au lieu de `^`.
+
+### Règle
+
+```smalltalk
+ReAbstractRule subclass: #ReReturnKeywordRule
+    instanceVariableNames: ''
+    classVariableNames: ''
+    package: 'Renraku'
+
+"Instance side"
+ReReturnKeywordRule >> checkMethod: aMethod
+    (aMethod sourceCode includesSubstring: 'return') ifTrue: [
+        ^ { ReTrivialCritique new
+            rule: self;
+            entity: aMethod;
+            tinyHint: 'Utilisez ^ au lieu de return';
+            yourself } ].
+    ^ #()
+
+ReReturnKeywordRule >> group
+    ^ 'Erreurs débutant'
+
+ReReturnKeywordRule >> name
+    ^ 'return au lieu de ^'
+
+ReReturnKeywordRule >> rationale
+    ^ 'En Pharo, le retour se fait avec ^ et non avec le mot-clé return'
+
+ReReturnKeywordRule >> severity
+    ^ #error
+
+"Class side"
+ReReturnKeywordRule class >> uniqueIdentifierName
+    ^ 'ReturnKeyword'
+```
+
+### Tests
+
+```smalltalk
+TestCase subclass: #ReReturnKeywordRuleTest
+    instanceVariableNames: 'rule testClass'
+    classVariableNames: ''
+    package: 'Renraku-Tests'
+
+ReReturnKeywordRuleTest >> setUp
+    super setUp.
+    rule := ReReturnKeywordRule new.
+    testClass := Object subclass: #TestReturnClass
+        instanceVariableNames: ''
+        classVariableNames: ''
+        package: 'Renraku-Tests-Temp'
+
+ReReturnKeywordRuleTest >> tearDown
+    testClass removeFromSystem.
+    super tearDown
+
+ReReturnKeywordRuleTest >> testDetectReturn
+    | method critiques |
+    testClass compile: 'testMethod
+        return 42'.
+    method := testClass >> #testMethod.
+    critiques := rule checkMethod: method.
+    self assert: critiques size equals: 1
+
+ReReturnKeywordRuleTest >> testNoDetectionForCaret
+    | method critiques |
+    testClass compile: 'testMethod
+        ^ 42'.
+    method := testClass >> #testMethod.
+    critiques := rule checkMethod: method.
+    self assert: critiques isEmpty
+```
+
+---
+
+## 5. ReAndOperatorRule
+
+Détecte `&&` au lieu de `and:`.
+
+### Règle
+
+```smalltalk
+ReAbstractRule subclass: #ReAndOperatorRule
+    instanceVariableNames: ''
+    classVariableNames: ''
+    package: 'Renraku'
+
+"Instance side"
+ReAndOperatorRule >> checkMethod: aMethod
+    (aMethod sourceCode includesSubstring: '&&') ifTrue: [
+        ^ { ReTrivialCritique new
+            rule: self;
+            entity: aMethod;
+            tinyHint: 'Utilisez and: au lieu de &&';
+            yourself } ].
+    ^ #()
+
+ReAndOperatorRule >> group
+    ^ 'Erreurs débutant'
+
+ReAndOperatorRule >> name
+    ^ '&& au lieu de and:'
+
+ReAndOperatorRule >> rationale
+    ^ 'En Pharo, l''opérateur logique ET s''écrit and: et non &&'
+
+ReAndOperatorRule >> severity
+    ^ #error
+
+"Class side"
+ReAndOperatorRule class >> uniqueIdentifierName
+    ^ 'AndOperator'
+```
+
+### Tests
+
+```smalltalk
+TestCase subclass: #ReAndOperatorRuleTest
+    instanceVariableNames: 'rule testClass'
+    classVariableNames: ''
+    package: 'Renraku-Tests'
+
+ReAndOperatorRuleTest >> setUp
+    super setUp.
+    rule := ReAndOperatorRule new.
+    testClass := Object subclass: #TestAndClass
+        instanceVariableNames: ''
+        classVariableNames: ''
+        package: 'Renraku-Tests-Temp'
+
+ReAndOperatorRuleTest >> tearDown
+    testClass removeFromSystem.
+    super tearDown
+
+ReAndOperatorRuleTest >> testDetectDoubleAmpersand
+    | method critiques |
+    testClass compile: 'testMethod: a
+        ^ a && true'.
+    method := testClass >> #testMethod:.
+    critiques := rule checkMethod: method.
+    self assert: critiques size equals: 1
+
+ReAndOperatorRuleTest >> testNoDetectionForAndColon
+    | method critiques |
+    testClass compile: 'testMethod: a
+        ^ a and: [ true ]'.
+    method := testClass >> #testMethod:.
+    critiques := rule checkMethod: method.
+    self assert: critiques isEmpty
+```
+
+---
+
+## 6. ReOrOperatorRule
+
+Détecte `||` au lieu de `or:`.
+
+### Règle
+
+```smalltalk
+ReAbstractRule subclass: #ReOrOperatorRule
+    instanceVariableNames: ''
+    classVariableNames: ''
+    package: 'Renraku'
+
+"Instance side"
+ReOrOperatorRule >> checkMethod: aMethod
+    (aMethod sourceCode includesSubstring: '||') ifTrue: [
+        ^ { ReTrivialCritique new
+            rule: self;
+            entity: aMethod;
+            tinyHint: 'Utilisez or: au lieu de ||';
+            yourself } ].
+    ^ #()
+
+ReOrOperatorRule >> group
+    ^ 'Erreurs débutant'
+
+ReOrOperatorRule >> name
+    ^ '|| au lieu de or:'
+
+ReOrOperatorRule >> rationale
+    ^ 'En Pharo, l''opérateur logique OU s''écrit or: et non ||'
+
+ReOrOperatorRule >> severity
+    ^ #error
+
+"Class side"
+ReOrOperatorRule class >> uniqueIdentifierName
+    ^ 'OrOperator'
+```
+
+### Tests
+
+```smalltalk
+TestCase subclass: #ReOrOperatorRuleTest
+    instanceVariableNames: 'rule testClass'
+    classVariableNames: ''
+    package: 'Renraku-Tests'
+
+ReOrOperatorRuleTest >> setUp
+    super setUp.
+    rule := ReOrOperatorRule new.
+    testClass := Object subclass: #TestOrClass
+        instanceVariableNames: ''
+        classVariableNames: ''
+        package: 'Renraku-Tests-Temp'
+
+ReOrOperatorRuleTest >> tearDown
+    testClass removeFromSystem.
+    super tearDown
+
+ReOrOperatorRuleTest >> testDetectDoublePipe
+    | method critiques |
+    testClass compile: 'testMethod: a
+        ^ a || false'.
+    method := testClass >> #testMethod:.
+    critiques := rule checkMethod: method.
+    self assert: critiques size equals: 1
+
+ReOrOperatorRuleTest >> testNoDetectionForOrColon
+    | method critiques |
+    testClass compile: 'testMethod: a
+        ^ a or: [ false ]'.
+    method := testClass >> #testMethod:.
+    critiques := rule checkMethod: method.
+    self assert: critiques isEmpty
+```
+
+---
+
+## 7. Noob
+
+Règle agrégée qui combine toutes les détections précédentes (booléens, `self`, `ifTrue[`/`ifFalse[`,
+`return`, `&&`, `||`) dans une seule règle.
+
+### Règle
+
+```smalltalk
+ReAbstractRule subclass: #Noob
+    instanceVariableNames: ''
+    classVariableNames: ''
+    package: 'Renraku'
+
+"===== INSTANCE SIDE ====="
+
+"Protocole: checking"
+Noob >> checkMethod: aMethod
+    "Détecte toutes les erreurs de débutant"
+    | critiques sourceCode |
+    critiques := OrderedCollection new.
+    sourceCode := aMethod sourceCode.
+
+    "Booléens"
+    self detectBoolean: 'True' shouldBe: 'true' in: sourceCode for: aMethod addTo: critiques.
+    self detectBoolean: 'False' shouldBe: 'false' in: sourceCode for: aMethod addTo: critiques.
+    self detectBoolean: 'Nil' shouldBe: 'nil' in: sourceCode for: aMethod addTo: critiques.
+    self detectBoolean: 'Self' shouldBe: 'self' in: sourceCode for: aMethod addTo: critiques.
+
+    "Structures de contrôle"
+    self detectPattern: 'ifTrue[' suggest: 'ifTrue: [' in: sourceCode for: aMethod addTo: critiques.
+    self detectPattern: 'ifFalse[' suggest: 'ifFalse: [' in: sourceCode for: aMethod addTo: critiques.
+
+    "Opérateurs"
+    self detectPattern: '&&' suggest: 'and:' in: sourceCode for: aMethod addTo: critiques.
+    self detectPattern: '||' suggest: 'or:' in: sourceCode for: aMethod addTo: critiques.
+    self detectPattern: 'return' suggest: '^' in: sourceCode for: aMethod addTo: critiques.
+
+    ^ critiques
+
+"Protocole: private"
+Noob >> detectBoolean: wrongForm shouldBe: correctForm in: sourceCode for: aMethod addTo: critiques
+    "Détecte une forme incorrecte de booléen"
+
+    (sourceCode includesSubstring: wrongForm) ifTrue: [
+        critiques add: (ReTrivialCritique new
+            rule: self;
+            entity: aMethod;
+            tinyHint: wrongForm, ' doit être écrit ', correctForm, ' (minuscules)';
+            yourself) ]
+
+Noob >> detectPattern: pattern suggest: suggestion in: sourceCode for: aMethod addTo: critiques
+    "Détecte un pattern incorrect"
+
+    (sourceCode includesSubstring: pattern) ifTrue: [
+        critiques add: (ReTrivialCritique new
+            rule: self;
+            entity: aMethod;
+            tinyHint: 'Utilisez ', suggestion, ' au lieu de ', pattern;
+            yourself) ]
+
+"Protocole: accessing"
+Noob >> group
+    ^ 'Erreurs débutant'
+
+Noob >> name
+    ^ 'Erreurs courantes de débutant'
+
+Noob >> rationale
+    ^ 'Détecte les erreurs de syntaxe typiques des débutants en Pharo'
+
+Noob >> severity
+    ^ #error
+
+"===== CLASS SIDE ====="
+
+"Protocole: accessing"
+Noob class >> uniqueIdentifierName
+    ^ 'NoobRule'
+```
+
+> ⚠️ Points de vigilance qui causaient les erreurs du Critic Browser :
+> - `ReSearchStringSourceAnchor` **n'existe pas** → toujours utiliser `ReTrivialCritique new` avec `rule:`, `entity:`, `tinyHint:`.
+> - Ne jamais laisser de variable non déclarée (ex. `errors`) : toute variable temporaire doit être dans `| ... |`.
+> - Pas de point final superflu après une instruction déjà terminée par un point de séparation implicite (ex. `OrderedCollection new.` en fin de méthode).
+> - Utiliser `checkMethod:` (et non `check:forCritiquesDo:`) pour une `ReAbstractRule` basée sur les méthodes.
+> - Toute méthode `initialize` doit être classée dans le protocole `initialization`, pas `initialize`.
+
+### Tests
+
+```smalltalk
+TestCase subclass: #NoobTest
+    instanceVariableNames: 'rule testClass'
+    classVariableNames: ''
+    package: 'Renraku-Tests'
+
+NoobTest >> setUp
+    super setUp.
+    rule := Noob new.
+    testClass := Object subclass: #TestNoobClass
+        instanceVariableNames: ''
+        classVariableNames: ''
+        package: 'Renraku-Tests-Temp'
+
+NoobTest >> tearDown
+    testClass removeFromSystem.
+    super tearDown
+
+NoobTest >> testDetectAllBeginnerErrors
+    | method critiques |
+    testClass compile: 'messyMethod
+        True && False ifTrue[ return Nil ]'.
+    method := testClass >> #messyMethod.
+    critiques := rule checkMethod: method.
+    "Détecte: True, False, &&, ifTrue[, return, Nil"
+    self assert: critiques size >= 5
+
+NoobTest >> testDetectIfTrueWithoutColon
+    | method critiques |
+    testClass compile: 'testMethod: x
+        x ifTrue[ ^ 1 ]'.
+    method := testClass >> #testMethod:.
+    critiques := rule checkMethod: method.
+    self assert: critiques size equals: 1.
+    self assert: (critiques first tinyHint includesSubstring: 'ifTrue:')
+
+NoobTest >> testDetectReturn
+    | method critiques |
+    testClass compile: 'testMethod
+        return 42'.
+    method := testClass >> #testMethod.
+    critiques := rule checkMethod: method.
+    self assert: critiques isNotEmpty.
+    self assert: (critiques anySatisfy: [ :c | c tinyHint includesSubstring: '^' ])
+
+NoobTest >> testDetectAndOperator
+    | method critiques |
+    testClass compile: 'testMethod: x
+        ^ x && true'.
+    method := testClass >> #testMethod:.
+    critiques := rule checkMethod: method.
+    self assert: critiques isNotEmpty.
+    self assert: (critiques anySatisfy: [ :c | c tinyHint includesSubstring: 'and:' ])
+
+NoobTest >> testDetectOrOperator
+    | method critiques |
+    testClass compile: 'testMethod: x
+        ^ x || false'.
+    method := testClass >> #testMethod:.
+    critiques := rule checkMethod: method.
+    self assert: critiques isNotEmpty.
+    self assert: (critiques anySatisfy: [ :c | c tinyHint includesSubstring: 'or:' ])
+
+NoobTest >> testDetectSelfCapitalization
+    | method critiques |
+    testClass compile: 'testMethod
+        ^ Self value'.
+    method := testClass >> #testMethod.
+    critiques := rule checkMethod: method.
+    self assert: critiques isNotEmpty
+
+NoobTest >> testNoErrorsInCleanCode
+    | method critiques |
+    testClass compile: 'cleanMethod
+        true ifTrue: [ ^ false and: [ true or: [ nil notNil ] ] ]'.
+    method := testClass >> #cleanMethod.
+    critiques := rule checkMethod: method.
+    self assert: critiques isEmpty
+```
+
+---
+
+## 8. Exécution des tests
+
+```smalltalk
+"Exécuter tous les tests un par un"
+ReBooleanCapitalizationRuleTest suite run.
+ReSelfCapitalizationRuleTest suite run.
+ReIfTrueColonRuleTest suite run.
+ReReturnKeywordRuleTest suite run.
+ReAndOperatorRuleTest suite run.
+ReOrOperatorRuleTest suite run.
+NoobTest suite run.
+
+"Ou regrouper dans une suite complète"
+TestCase subclass: #RenrakuBeginnerRulesTestSuite
+    instanceVariableNames: ''
+    classVariableNames: ''
+    package: 'Renraku-Tests'
+
+RenrakuBeginnerRulesTestSuite class >> suite
+    | suite |
+    suite := TestSuite named: 'Renraku Beginner Rules Suite'.
+    suite addTest: ReBooleanCapitalizationRuleTest suite.
+    suite addTest: ReSelfCapitalizationRuleTest suite.
+    suite addTest: ReIfTrueColonRuleTest suite.
+    suite addTest: ReReturnKeywordRuleTest suite.
+    suite addTest: ReAndOperatorRuleTest suite.
+    suite addTest: ReOrOperatorRuleTest suite.
+    suite addTest: NoobTest suite.
+    ^ suite
+
+"Lancer la suite complète"
+RenrakuBeginnerRulesTestSuite suite run.
+```
+
+### Vérification finale dans le Critic Browser
+
+1. Ouvrir **World > Tools > Critic Browser**.
+2. Sélectionner le package `Renraku`.
+3. Vérifier que les catégories **Bugs**, **Clean Code** et **Design Flaws** sont vides pour ces classes.
+4. Si une méthode `initialize` existe, s'assurer qu'elle est bien dans le protocole `initialization`.
