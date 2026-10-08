@@ -1,0 +1,126 @@
+# Les tests compilent du code fautif dans une classe jetable. Créez-la une fois dans le System Browser. Vérification : Smalltalk includesKey: #TestBooleanClass doit afficher true (c'est déjà votre cas).
+
+Object << #TestBooleanClass
+    slots: {};
+    package: 'Renraku-Tests-Temp'
+
+
+Méthode commune includesWord:in:
+Pour chaque règle qui l'utilise
+
+
+includesWord: aWord in: sourceCode
+    | start index before after |
+    start := 1.
+    [ index := sourceCode indexOfSubCollection: aWord startingAt: start.
+      index > 0 ] whileTrue: [
+        before := index > 1
+            ifTrue: [ sourceCode at: index - 1 ]
+            ifFalse: [ Character space ].
+        after := (index + aWord size) <= sourceCode size
+            ifTrue: [ sourceCode at: index + aWord size ]
+            ifFalse: [ Character space ].
+        (before isAlphaNumeric or: [ after isAlphaNumeric ])
+            ifFalse: [ ^ true ].
+        start := index + 1 ].
+    ^ false
+
+
+ReBooleanCapitalizationRule:
+Détecte True, False, Nil.
+
+Règle
+"Protocole: checking"
+checkMethod: aMethod
+    | critiques sourceCode |
+    critiques := OrderedCollection new.
+    sourceCode := aMethod sourceCode.
+
+    self detectBoolean: 'True' -> 'true' in: sourceCode for: aMethod critiques: critiques.
+    self detectBoolean: 'False' -> 'false' in: sourceCode for: aMethod critiques: critiques.
+    self detectBoolean: 'Nil' -> 'nil' in: sourceCode for: aMethod critiques: critiques.
+
+    ^ critiques
+
+"Protocole: private"
+detectBoolean: aForm in: sourceCode for: aMethod critiques: critiques
+    "Detect incorrect form and create a critic with personnalized message"
+
+    (self includesWord: aForm key in: sourceCode) ifTrue: [
+        critiques add: ((ReTrivialCritique for: aMethod by: self)
+            tinyHint: aForm key, ' doit être écrit ', aForm value, ' (minuscules)';
+            yourself) ]
+
+"Protocole: private"
+includesWord: aWord in: sourceCode
+    "... ..."
+
+"Protocole: accessing"
+group
+    ^ 'Erreurs débutant'
+
+name
+    ^ 'Booléens mal capitalisés'
+
+rationale
+    ^ 'En Pharo, les booléens et nil doivent être écrits en minuscules: true, false, nil'
+
+severity
+    ^ #error
+
+"Côté classe, protocole: manifest"
+ReBooleanCapitalizationRule class >> uniqueIdentifierName
+    ^ 'BooleanCapitalization'
+
+TEST
+ReExclusivelyBeginnersRuleTest << #ReBooleanCapitalizationRuleTest
+    slots: {};
+    tag: 'Rules';
+    package: 'Renraku-Tests'
+
+testDetectTrue
+    | critiques |
+    TestBooleanClass compile: 'testMethod
+        ^ True'.
+    critiques := ReBooleanCapitalizationRule new
+        checkMethod: (TestBooleanClass >> #testMethod).
+    self assert: critiques size equals: 1.
+    self assert: (critiques first tinyHint includesSubstring: 'true')
+
+testDetectFalse
+    | critiques |
+    TestBooleanClass compile: 'testMethod
+        ^ False'.
+    critiques := ReBooleanCapitalizationRule new
+        checkMethod: (TestBooleanClass >> #testMethod).
+    self assert: critiques size equals: 1.
+    self assert: (critiques first tinyHint includesSubstring: 'false')
+
+testDetectNil
+    | critiques |
+    TestBooleanClass compile: 'testMethod
+        | Nil |
+        ^ Nil'.
+    critiques := ReBooleanCapitalizationRule new
+        checkMethod: (TestBooleanClass >> #testMethod).
+    self assert: critiques size equals: 1.
+    self assert: (critiques first tinyHint includesSubstring: 'nil')
+
+testDetectMultiple
+    | critiques |
+    TestBooleanClass compile: 'testMethod
+        | Nil |
+        True ifTrue: [ ^ False ].
+        ^ Nil'.
+    critiques := ReBooleanCapitalizationRule new
+        checkMethod: (TestBooleanClass >> #testMethod).
+    self assert: critiques size equals: 3
+
+testNoFalsePositives
+    | critiques |
+    TestBooleanClass compile: 'testMethod
+        true ifTrue: [ ^ false ].
+        ^ nil'.
+    critiques := ReBooleanCapitalizationRule new
+        checkMethod: (TestBooleanClass >> #testMethod).
+    self assert: critiques isEmpty
