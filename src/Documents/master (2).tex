@@ -1,0 +1,322 @@
+\documentclass[11pt,a4paper]{report}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{lmodern}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{booktabs}
+\usepackage{xcolor}
+
+\lstdefinelanguage{Smalltalk}{
+  morekeywords={self,super,true,false,nil,thisContext},
+  sensitive=true,
+  morecomment=[s]{"}{"},
+  morestring=[b]'
+}
+\lstset{language=Smalltalk,basicstyle=\ttfamily\small,
+  commentstyle=\color{gray},breaklines=true,frame=single}
+
+\newcommand{\todo}[1]{\textcolor{red}{[À FAIRE : #1]}}
+
+\title{Sélection de règles de qualité fondée sur le profil du développeur\\
+\large Adapter les règles de qualité Renraku au niveau des développeurs Pharo}
+\author{\todo{Nom}}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+\begin{abstract}
+\todo{Résumé court : problème, approche (niveaux de règles + profil de développeur), résultats.}
+
+\end{abstract}
+
+%------------------------------------------------------------
+\chapter{Pourquoi des règles de qualité}
+\section{Qualité du code et maintenabilité}
+Le code est lu bien plus souvent qu’il n’est écrit, et un logiciel passe l’essentiel de sa vie en maintenance. Une grande partie du coût d’un système dépend donc de la facilité avec laquelle on comprend et on modifie son code. Un code qui fonctionne mais qui est difficile à lire ralentit chaque modification ultérieure, cache des bugs et complique l’arrivée de nouveaux développeurs dans un projet. Ce coût accumulé est souvent appelé dette technique (Cunningham, 1992).
+
+La qualité n’est pas une propriété unique. Elle recouvre la lisibilité, la cohérence des noms, des méthodes courtes et cohésives, l’absence de duplication et le respect des idiomes du langage. Certaines de ces propriétés sont subjectives, mais beaucoup peuvent être décrites précisément comme des motifs à éviter. Fowler (1999) appelle ces motifs des code smells ; dans la communauté Smalltalk, Beck (1996) a documenté les idiomes que suivent les développeurs expérimentés.
+
+La revue de code est la manière traditionnelle de maintenir la qualité. Elle est efficace mais coûteuse, dépend de la disponibilité de relecteurs expérimentés et ne passe pas à l’échelle de chaque méthode qu’un développeur écrit. Cela motive des outils qui capturent le savoir des relecteurs sous forme de règles explicites et exécutables.
+
+\section{Analyse statique et règles en pratique}
+Une règle de qualité est un petit morceau de code qui inspecte un élément d’un programme, comme une méthode ou une classe, et produit une critique lorsque cet élément viole une convention. Une bonne règle s’accompagne d’une justification qui explique pourquoi le motif est problématique, et parfois d’une correction automatique. Les règles sont peu coûteuses à exécuter, donnent un retour immédiat et appliquent le même standard à tous.
+
+L’analyse par règles existe dans la plupart des écosystèmes : Checkstyle pour Java, Pylint pour Python, ESLint pour JavaScript, SonarQube pour de nombreux langages. Smalltalk a une longue tradition dans ce domaine, à commencer par SmallLint (Roberts, Brant et Johnson, 1997), ancêtre des outils disponibles aujourd’hui dans Pharo. La plupart des règles de Pharo ne travaillent pas sur du texte brut : elles inspectent l’arbre syntaxique abstrait (AST) d’une méthode, dans lequel chaque envoi de message, littéral, variable ou bloc est un nœud. Cela permet de décrire précisément un motif de code et de désigner le nœud exact qui le viole.
+
+Dans Pharo, les règles sont exécutées par Renraku (Tymchuk, Ghafari et Nierstrasz, 2017), un modèle d’analyse statique qui sert de médiateur entre les analyseurs et les outils qui présentent leurs rapports. Renraku est au cœur du travail de Tymchuk (2017) sur le quality-aware tooling : une approche qui promeut l’analyse statique en l’intégrant de façon transparente dans les outils de développement, principalement en donnant un retour qualité en direct dans l’éditeur de code. Ce travail rapporte que 90 \% des développeurs qui ont utilisé le retour en direct l’ont trouvé utile, et que les règles de qualité ont été revues pour mieux correspondre aux pratiques de développement actuelles. En pratique, les critiques apparaissent dans le Critique Browser, dans l’éditeur, et lorsque le code est sauvegardé ou commité.
+
+Les outils d’analyse statique ont aussi des limites connues. Ils produisent des faux positifs, peuvent submerger les utilisateurs d’avertissements, et les développeurs finissent souvent par ne plus les utiliser pour cette raison (Johnson et al., 2013). L’utilité d’un outil dépend de la pertinence de ses messages pour la personne qui les lit. Le quality-aware tooling abaisse la barrière d’usage de l’analyse, mais il ne décide pas quelles critiques chaque développeur doit voir.
+
+\section{Le problème : un même jeu de règles pour tous les développeurs}
+Aujourd’hui, tous les développeurs reçoivent les mêmes règles, quelle que soit leur expérience. C’est un problème dans les deux sens. Un débutant qui reçoit des dizaines de critiques, dont beaucoup portent sur des questions de conception subtiles, ne sait pas lesquelles comptent et peut toutes les ignorer. Un développeur expérimenté peut trouver les règles de base bruyantes, alors qu’il profiterait de contrôles plus stricts et plus avancés.
+
+Certaines violations sont aussi de forts indices du parcours du développeur. Les développeurs Pharo expérimentés n’écrivent pratiquement jamais \lstinline|true ifTrue: [ ... ]|, et une méthode comme \lstinline|foo: True| est typique d’un développeur Python qui apprend Pharo. Une seule violation d’une telle règle en dit long sur le profil, alors que la violation d’une règle de conception subtile en dit très peu.
+
+Le quality-aware tooling rend les critiques visibles dans de plus en plus d’endroits de l’environnement, si bien que leur pertinence compte encore davantage : plus les critiques apparaissent partout, plus un débutant risque d’être submergé.
+
+Ce mémoire propose d’adapter les règles au développeur. L’approche comporte trois parties :
+
+\begin{itemize}
+  \item classifier les règles Renraku existantes en trois niveaux : Noob, Intermediate et Expert ;
+  \item construire un profil de développeur à partir des règles que son code viole, en donnant plus de poids aux violations les plus révélatrices ;
+  \item utiliser ce profil pour sélectionner les règles et les critiques pertinentes pour chaque développeur.
+\end{itemize}
+
+Le profil est calculé à partir du code lui-même, lorsque Renraku s’exécute dessus, et ne nécessite pas d’identifier l’auteur de chaque méthode.
+
+\section{Structure du document}
+Le chapitre 2 présente Renraku et son architecture. Le chapitre 3 analyse les règles existantes et les classe par niveau. Le chapitre 4 définit le modèle de profil, le chapitre 5 décrit son implémentation et le chapitre 6 évalue l’approche.
+
+\section*{Références de ce chapitre}
+Beck, K. (1996). Smalltalk Best Practice Patterns. Prentice Hall.
+
+Cunningham, W. (1992). The WyCash portfolio management system. OOPSLA Experience Report.
+
+Fowler, M. (1999). Refactoring: Improving the Design of Existing Code. Addison-Wesley.
+
+Johnson, B., Song, Y., Murphy-Hill, E., Bowdidge, R. (2013). Why don't software developers use static analysis tools to find bugs? ICSE 2013.
+
+Tymchuk, Y. (2017). Quality-Aware Tooling. PhD dissertation, University of Bern.
+
+Tymchuk, Y., Ghafari, M., Nierstrasz, O. (2017). Renraku: the one static analysis model to rule them all. IWST 2017 (12th International Workshop on Smalltalk Technologies). ACM. doi:10.1145/3139903.3139919
+
+Roberts, D., Brant, J., Johnson, R. (1997). A refactoring tool for Smalltalk. Theory and Practice of Object Systems 3(4).
+
+%------------------------------------------------------------
+\chapter{Renraku et son architecture}
+Renraku est le framework de Pharo pour définir et traiter des règles de qualité (Tymchuk, Ghafari et Nierstrasz, 2017). Il a été conçu comme un médiateur entre les analyseurs et les outils qui affichent leurs résultats, de sorte qu’une nouvelle règle soit disponible dans tous les outils sans les modifier. Ce chapitre suit la documentation du framework (doc/QualityRules.md, branche Pharo15 du dépôt Pharo) et ajoute les points qui comptent pour la suite de ce mémoire.
+
+\section{Entités, règles et critiques}
+Renraku manipule trois concepts. Les entités sont les objets qui sont validés. Elles ne font pas partie de Renraku : en théorie n’importe quel objet peut être une entité, mais en pratique ce sont des entités de code comme les méthodes, les classes, les paquets et les nœuds AST. Les règles sont des objets qui décrivent des contraintes sur les entités ; une règle vérifie une entité et produit des critiques. Une critique relie une entité à une règle que cette entité viole, décrit la violation et peut proposer une correction.
+
+Une règle peut être vue comme une fonction qui consomme une entité et produit une collection de critiques, vide lorsqu’il n’y a pas de violation.
+
+\section{Règles}
+ReAbstractRule est la racine de toutes les règles. Elle est sous-classée directement par les règles qui vérifient des méthodes, des classes ou des paquets. ReNodeBasedRule est la racine des règles qui vérifient des nœuds AST. RePatternCodeRule regroupe ce qui est commun aux règles fondées sur des expressions de réécriture, et a deux sous-classes : ReNodeMatchRule, qui reconnaît des motifs de code, et ReNodeRewriteRule, qui propose en plus une transformation du code reconnu. La plupart des règles sont dans le paquet General-Rules, et les règles propres à un framework se trouvent à côté de celui-ci (par exemple SUnit-Rules, Spec2-Rules ou NewTools-Rules).
+
+Une règle est décrite par quelques caractéristiques, la plupart définies côté classe :
+
+\begin{itemize}
+  \item ruleName est le nom court de la règle, utilisé comme titre de ses critiques, et rationale la décrit, en général en une ligne. Par défaut, la justification est le commentaire de la classe.
+  \item checksMethod, checksClass, checksPackage et checksNode indiquent quelles entités intéressent la règle. Les outils ne lui passent que des entités de ces types, et une règle qui répond false à toutes ces méthodes n’est pas visible.
+  \item basicCheck: est la manière la plus simple de vérifier une entité : elle répond true s’il y a une violation. L’implémentation par défaut crée une ReTrivialCritique. Une règle qui doit signaler plusieurs critiques sur une même entité (par exemple une par variable inutilisée) redéfinit plutôt check:forCritiquesDo:.
+  \item groupSelector range la règle dans un groupe, et severity vaut information, warning (par défaut) ou error.
+  \item uniqueIdentifierName est l’identifiant utilisé par les manifests pour stocker les critiques bannies par l’utilisateur. C’est par défaut le nom de la classe.
+\end{itemize}
+
+Un exemple complet de règle qui vérifie des classes :
+
+\begin{lstlisting}
+ReAbstractRule << #ReNoClassCommentRule
+	package: 'General-Rules'
+
+ReNoClassCommentRule class >> checksClass
+	^ true
+
+ReNoClassCommentRule class >> ruleName
+	^ 'No class comment'
+
+ReNoClassCommentRule class >> groupSelector
+	^ #codingIdiomViolationGroup
+
+ReNoClassCommentRule >> basicCheck: aClass
+	(aClass isMeta or: [ aClass isTestCase ]) ifTrue: [ ^ false ].
+	^ aClass hasComment not
+\end{lstlisting}
+
+\section{Groupes et sévérité}
+Les règles sont organisées en groupes, chacun défini par une méthode de classe de ReAbstractRule. Les réglages du Quality Assistant utilisent ces groupes pour permettre à l’utilisateur d’activer ou de désactiver des règles. Le Critique Browser classe aussi les critiques par groupe, par exemple Clean Code, Coding Idiom Violation ou Design Flaws.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ll}
+\toprule
+groupSelector & Nom du groupe \\
+\midrule
+\texttt{apiChangeGroup} & API Change \\
+\texttt{apiHintsGroup} & API Hints \\
+\texttt{architecturalGroup} & Architectural \\
+\texttt{bugsGroup} & Bugs \\
+\texttt{cleanCodeGroup} & Clean Code \\
+\texttt{codingIdiomViolationGroup} & Coding Idiom Violation \\
+\texttt{designFlawGroup} & Design Flaws \\
+\texttt{instanceMethodProtocolGroup} & Instance Method Protocol \\
+\texttt{methodProtocolNameGroup} & Method Protocol Name \\
+\texttt{optimizationGroup} & Optimization \\
+\texttt{potentialBugsGroup} & Potential Bugs \\
+\texttt{rubricGroup} & Rubric \\
+\texttt{specGroup} & Spec \\
+\texttt{styleGroup} & Style \\
+\texttt{sunitGroup} & SUnit \\
+\texttt{unclassifiedMethodsGroup} & Règles non classées (par défaut) \\
+\bottomrule
+\end{tabular}
+\caption{Groupes de règles définis dans ReAbstractRule.}
+\end{table}
+
+Le gestionnaire de règles (ReRuleManager) garde en cache les règles utilisées par les outils. Le cache est réinitialisé automatiquement lorsqu’une classe de règle est ajoutée ou supprimée, mais une règle est souvent créée incomplète : il faut donc exécuter ReRuleManager reset une fois la règle terminée.
+
+\section{Arbres syntaxiques abstraits et règles par nœud}
+Les règles qui vérifient des nœuds AST héritent de ReNodeBasedRule. Une méthode est analysée en un arbre syntaxique abstrait, et ces règles sont évaluées sur chaque nœud de chaque méthode. Comme cela peut être coûteux, une règle peut redéfinir le crochet shouldCheckMethod: pour ignorer les méthodes qui ne peuvent pas la violer.
+
+Les règles par motif facilitent l’écriture de règles par nœud. Une ReNodeMatchRule est configurée, dans sa méthode initialize, avec une ou plusieurs expressions de réécriture (matches:, matchesAny:, addMatchingMethod:). Une expression de réécriture est du code avec des jokers : par exemple le motif qui place un littéral flottant d’un côté d’une égalité, écrit avec un joker backtick pour le littéral et un autre pour une expression quelconque. La méthode afterCheck:mappings: permet ensuite de valider la correspondance, grâce au dictionnaire des valeurs liées aux jokers. Une ReNodeRewriteRule ajoute le remplacement (replace:with:, replace:byEvaluating:), de sorte que ses critiques proposent un changement qui réécrit le code reconnu.
+
+\begin{lstlisting}
+ReFloatEqualityComparisonRule >> initialize
+	super initialize.
+	self matchesAny: #(
+		'`#floatLiteral = `@expr'
+		'`@expr = `#floatLiteral' )
+
+ReFloatEqualityComparisonRule >> afterCheck: aNode mappings: mappingDict
+	^ (mappingDict at: '`#floatLiteral') value isFloat
+\end{lstlisting}
+
+Cela compte pour ce mémoire pour deux raisons. D’abord, les violations qui trahissent un débutant, comme une conditionnelle envoyée au littéral true, sont des motifs de code : elles peuvent donc s’écrire comme des règles de reconnaissance de motif et être localisées précisément sur un nœud. Ensuite, le type d’entité et le type de motif utilisés par une règle sont des caractéristiques qui peuvent aider à classer les règles par niveau (chapitre 3).
+
+\section{Critiques}
+ReAbstractCritique est la racine des critiques. Elle hérite de ReProperty, qui représente une propriété externe d’une entité : un titre, une icône et une ancre de source qui pointe vers le morceau de code. Une critique garde une référence vers la règle qui a signalé la violation : le nom de la règle est le titre, la sévérité définit l’icône et la justification sert de description.
+
+Le lien vers l’entité critiquée passe par une ancre de source (ReSourceAnchor), qui référence la classe, la méthode ou l’autre entité, et peut fournir un intervalle de sélection dans son code source. Il existe deux sortes d’ancres : ReIntervalSourceAnchor stocke l’intervalle, et ReSearchStringSourceAnchor stocke une chaîne qui est recherchée dans le code source à la demande.
+
+Une critique peut aussi fournir une correction automatique : providesChange indique si elle le peut, et change répond un changement de refactoring (RBRefactoryChange). Enfin, une critique peut proposer des actions personnalisées aux outils, sous la forme d’une liste d’objets RePropertyAction, comme les boutons affichés dans le navigateur.
+
+\section{Exécution des règles et quality-aware tooling}
+Les outils sélectionnent les règles en interrogeant les classes de règles avec checksMethod, checksClass, etc. La méthode principale d’une règle est check:forCritiquesDo:, qui évalue un bloc pour chaque critique. Des méthodes de confort existent : check: répond la collection de critiques, check:ifNoCritiques: et check:forCritiquesDo:ifNone: prennent un bloc supplémentaire pour le cas sans critique.
+
+Pour exécuter des règles sur tout un environnement, ReSmalllintChecker envoie chaque entité d’un paquet ou d’une classe aux règles qui s’y intéressent : le paquet, les classes, les méthodes et les nœuds AST des méthodes. Le message critiques envoyé à une classe, une méthode ou un paquet exécute toutes les règles activées, comme le fait le Quality Assistant, et ignore les critiques bannies dans les manifests. Il s’appuie sur ReCriticEngine : critiquesOf: exécute les règles de méthode, de classe et de paquet, et nodeCritiquesOf: exécute les règles par nœud sur l’AST d’une méthode. À noter qu’une règle par nœud attend un nœud : check: sur une méthode ne répond donc aucune critique pour une telle règle.
+
+Suivant l’approche quality-aware tooling (Tymchuk, 2017), l’analyse fait partie du flux de travail normal :
+
+\begin{itemize}
+  \item lorsque le développeur écrit une méthode, avec un retour en direct dans l’éditeur et le Quality Assistant ;
+  \item à la demande, sur un paquet, avec le Critique Browser ;
+  \item automatiquement, par exemple au moment du commit.
+\end{itemize}
+
+\section{Écrire et tester une règle}
+Écrire une règle consiste à choisir une superclasse, lui donner un nom et une justification, dire quelles entités elle vérifie, implémenter la vérification, choisir son groupe et sa sévérité, la documenter dans le commentaire de sa classe avec une violation et sa version corrigée, puis réinitialiser le cache du gestionnaire de règles.
+
+Les tests de règles sous-classent ReAbstractRuleTestCase et portent le nom de la règle suivi de Test, car le test retrouve la règle à partir du nom de sa classe. Un test fournit une méthode qui viole la règle et une qui ne la viole pas, et les vérifie avec myCritiquesOnMethod: (qui gère aussi les règles par nœud) ou myCritiquesOnClass:. Les méthodes compilées avec generateMethod: sont supprimées après le test.
+
+\begin{lstlisting}
+ReAsClassRuleTest >> methodWithAsClassIfAbsent
+	self class asClassIfAbsent: [  ]
+
+ReAsClassRuleTest >> testRuleWithAsClassIfAbsent
+	self assert: (self myCritiquesOnMethod: self class >> #methodWithAsClassIfAbsent) size equals: 1
+
+ReAsClassRuleTest >> testRuleNotViolated
+	self assertEmpty: (self myCritiquesOnMethod: self class >> #testRuleNotViolated)
+\end{lstlisting}
+
+\section{Des règles SmallLint aux règles Renraku}
+Les règles des anciennes versions de Pharo étaient écrites comme des sous-classes de RBParseTreeLintRule et de RBTransformationRule. Toutes les règles sont désormais des règles Renraku, et ces deux classes n’ont plus de sous-classe. Les règles génériques sont devenues des sous-classes de ReAbstractRule avec basicCheck:, les règles par arbre syntaxique sont devenues des ReNodeMatchRule, et les règles de réécriture des ReNodeRewriteRule. La classe ReSmalllintChecker garde le nom de l’outil d’origine.
+
+\todo{Comparer avec la section 7 de Tymchuk et al. (2017) si l’on veut plus de détails sur la migration historique.}
+
+\section{Ce que l’architecture offre pour les profils de développeurs}
+L’architecture contient déjà l’essentiel de ce dont un profil a besoin, et suggère comment l’étendre :
+
+\begin{itemize}
+  \item Une règle possède des attributs de classe comme le groupe et la sévérité. Le niveau (Noob, Intermediate, Expert) et le poids peuvent être ajoutés de la même façon, comme méthodes de classe de ReAbstractRule.
+  \item Chaque critique référence sa règle : les violations vues par Renraku, via le Critique Browser, l’éditeur ou un commit, suffisent donc à compter les violations par niveau et par règle sans identifier l’auteur.
+  \item Les manifests stockent les critiques que le développeur a bannies. Le modèle de profil doit décider si une critique bannie compte encore comme une violation.
+  \item Les tests de règles suivent une convention simple : les règles de chaque niveau peuvent donc être testées de la même façon que les règles existantes.
+\end{itemize}
+
+\todo{Discuter ces choix de conception avec l’encadrant avant de fixer le modèle au chapitre 4.}
+
+%------------------------------------------------------------
+\chapter{Analyse des règles existantes}
+\section{Méthodologie}
+\todo{Comment les règles ont été examinées : description, justification, faux positifs, tests ; type d’entité (méthode, classe, nœud AST) et motif utilisé par chaque règle.}
+
+\section{Catalogue des règles existantes}
+\todo{Un tableau par groupe (Clean Code, Coding Idiom Violation, Design Flaws, ...).}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\toprule
+Règle & Groupe & Description & Remarques \\
+\midrule
+\todo{} & & & \\
+\bottomrule
+\end{tabular}
+\caption{Règles Renraku existantes.}
+\end{table}
+
+\section{Règles bugguées ou douteuses}
+\todo{Exemple : « Unnecessary characters found in method body » signale des méthodes du cœur de Pharo ; à investiguer.}
+
+\section{Classification : Noob, Intermediate, Expert}
+\todo{Critères, puis classification de chaque règle.}
+
+%------------------------------------------------------------
+\chapter{Modèle de profil}
+\section{Niveau et poids d’une règle}
+Chaque règle a un niveau (Noob, Intermediate, Expert) et un poids. Certaines violations sont de forts indices d’un profil débutant (par exemple \lstinline|true ifTrue: [ ... ]|, ou un \lstinline|foo: True| à la manière de Python) et reçoivent un poids élevé.
+
+\section{Profil du développeur}
+Par niveau : le nombre de violations et leur ratio sur l’ensemble des violations, par exemple :
+
+\begin{lstlisting}
+noob violation: 15 ratio: 30%
+\end{lstlisting}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\toprule
+Niveau & Violations & Ratio & Score pondéré \\
+\midrule
+noob & 15 & 30\% & \\
+intermediate & & & \\
+expert & & & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Fonction de classification}
+\todo{Score pondéré, seuils, gestion des égalités et des petits échantillons.}
+
+\section{Évolution dans le temps}
+\todo{Historique daté pour observer la progression.}
+
+%------------------------------------------------------------
+\chapter{Implémentation}
+\section{Niveaux et poids des règles dans Renraku}
+\todo{level et weight comme méthodes de classe de ReAbstractRule, comme groupSelector et severity.}
+
+\section{Collecte des violations}
+\todo{Brancher la collecte sur les exécutions de critiques (sauvegarde, Critique Browser, commit) ; utiliser le nœud AST de chaque critique pour localiser la violation.}
+
+\section{Objet profil et persistance}
+\todo{Fichier STON dans le dossier preferences.}
+
+\section{Sélection des règles selon le profil}
+\todo{Quelles règles sont affichées ou activées pour chaque profil.}
+
+\section{Tests}
+\todo{Classes de test pour les règles Noob, Intermediate et Expert.}
+
+%------------------------------------------------------------
+\chapter{Évaluation}
+\section{Questions de recherche}
+\todo{La classification est-elle exacte ? Les règles sélectionnées sont-elles utiles ?}
+
+\section{Protocole expérimental}
+\todo{Jeux de données : code d’étudiants, code d’experts (cœur de Pharo), ...}
+
+\section{Résultats}
+\section{Menaces à la validité}
+%------------------------------------------------------------
+\chapter{Conclusion}
+\todo{Synthèse et travaux futurs.}
+
+\end{document}
